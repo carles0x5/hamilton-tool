@@ -350,20 +350,34 @@ export default function ComparisonTab({ data, symbol }: ComparisonTabProps) {
                         {strategy.parameters.map(param => (
                           <div key={param.id}>
                             <label className="block text-xs font-medium text-gray-600 mb-1">{param.name}</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="range"
-                                min={param.min}
-                                max={param.max}
-                                step={param.step}
+                            {/* Special dropdown for Hamilton force calculation method */}
+                            {param.id === 'method' && strategyId === 'hamilton' ? (
+                              <select
                                 value={strategyParams[strategyId]?.[param.id] ?? param.defaultValue}
                                 onChange={(e) => updateStrategyParam(strategyId, param.id, Number(e.target.value))}
-                                className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                              />
-                              <span className="text-xs font-bold text-gray-700 w-8 text-right tabular-nums">
-                                {strategyParams[strategyId]?.[param.id] ?? param.defaultValue}
-                              </span>
-                            </div>
+                                className="input-modern text-sm"
+                              >
+                                <option value={1}>MFI (Money Flow Index)</option>
+                                <option value={2}>PVM (Price-Volume Momentum)</option>
+                                <option value={3}>Momentum</option>
+                                <option value={4}>A/D (Accumulation/Distribution)</option>
+                              </select>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="range"
+                                  min={param.min}
+                                  max={param.max}
+                                  step={param.step}
+                                  value={strategyParams[strategyId]?.[param.id] ?? param.defaultValue}
+                                  onChange={(e) => updateStrategyParam(strategyId, param.id, Number(e.target.value))}
+                                  className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                />
+                                <span className="text-xs font-bold text-gray-700 w-8 text-right tabular-nums">
+                                  {strategyParams[strategyId]?.[param.id] ?? param.defaultValue}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
