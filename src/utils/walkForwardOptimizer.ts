@@ -105,6 +105,7 @@ function getMetricValue(result: BacktestResult, metric: OptimizationMetric): num
 
 /**
  * Generate parameter combinations for grid search
+ * Limits total combinations to prevent overfitting
  */
 function generateParameterCombinations(
   strategy: Strategy,
@@ -115,16 +116,29 @@ function generateParameterCombinations(
     return [{}];
   }
 
-  // Get ranges for each parameter
+  // Get ranges for each parameter - use coarser steps to reduce combinations
   const paramRanges = params.map(p => {
     const custom = customRanges?.[p.id];
     const min = custom?.min ?? p.min;
     const max = custom?.max ?? p.max;
-    const step = custom?.step ?? p.step;
+    // Use larger steps to reduce combinations (multiply default step by 2-3)
+    let step = custom?.step ?? p.step;
+    
+    // Calculate how many values this would generate
+    const numValues = Math.floor((max - min) / step) + 1;
+    // If too many, use larger step
+    if (numValues > 5) {
+      step = Math.ceil((max - min) / 4); // Max 5 values per parameter
+    }
     
     const values: number[] = [];
     for (let v = min; v <= max; v += step) {
       values.push(v);
+    }
+    // Always include default value if not present
+    if (!values.includes(p.defaultValue) && p.defaultValue >= min && p.defaultValue <= max) {
+      values.push(p.defaultValue);
+      values.sort((a, b) => a - b);
     }
     return { id: p.id, values };
   });
@@ -146,6 +160,23 @@ function generateParameterCombinations(
   }
   
   generate(0, {});
+  
+  // Limit to max 50 combinations to prevent overfitting
+  if (combinations.length > 50) {
+    // Randomly sample 50 combinations, always including default params
+    const defaultParams: Record<string, number> = {};
+    params.forEach(p => { defaultParams[p.id] = p.defaultValue; });
+    
+    const shuffled = combinations.sort(() => Math.random() - 0.5);
+    const sampled = shuffled.slice(0, 49);
+    
+    // Ensure default params are included
+    if (!sampled.some(c => Object.entries(defaultParams).every(([k, v]) => c[k] === v))) {
+      sampled.push(defaultParams);
+    }
+    return sampled;
+  }
+  
   return combinations;
 }
 

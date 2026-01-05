@@ -280,11 +280,11 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 2. Moving Average Crossover (Faster response)
+  // 2. Moving Average Crossover (Persistent signals)
   {
     id: 'ma_crossover',
     name: 'Moving Average Crossover',
-    description: 'Buy when fast EMA crosses above slow EMA, sell on cross below',
+    description: 'Stay long while fast EMA > slow EMA, exit when fast < slow',
     category: 'trend',
     parameters: [
       { id: 'fastPeriod', name: 'Fast EMA Period', defaultValue: 10, min: 5, max: 30, step: 1 },
@@ -299,6 +299,7 @@ export const strategies: Strategy[] = [
       const slowMA = calculateEMA(closes, slowPeriod);
       
       const signals: StrategySignal[] = [];
+      let inPosition = true; // Start invested
       
       for (let i = 0; i < data.length; i++) {
         if (i < slowPeriod || isNaN(fastMA[i]) || isNaN(slowMA[i])) {
@@ -306,13 +307,15 @@ export const strategies: Strategy[] = [
           continue;
         }
         
-        const prevFastAbove = fastMA[i - 1] > slowMA[i - 1];
-        const currFastAbove = fastMA[i] > slowMA[i];
+        const bullish = fastMA[i] > slowMA[i];
         
-        if (!prevFastAbove && currFastAbove) {
+        // Persistent signals: stay in position while bullish
+        if (bullish && !inPosition) {
           signals.push('BUY');
-        } else if (prevFastAbove && !currFastAbove) {
+          inPosition = true;
+        } else if (!bullish && inPosition) {
           signals.push('SELL');
+          inPosition = false;
         } else {
           signals.push('HOLD');
         }
@@ -328,11 +331,11 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 3. MACD Strategy
+  // 3. MACD Strategy (Persistent signals)
   {
     id: 'macd',
     name: 'MACD Crossover',
-    description: 'Buy when MACD crosses above signal line, sell when it crosses below',
+    description: 'Stay long while MACD > signal line, exit when MACD < signal',
     category: 'momentum',
     parameters: [
       { id: 'fastPeriod', name: 'Fast EMA', defaultValue: 12, min: 5, max: 20, step: 1 },
@@ -346,6 +349,7 @@ export const strategies: Strategy[] = [
       
       const { macd, signal, histogram } = calculateMACD(data, fastPeriod, slowPeriod, signalPeriod);
       const signals: StrategySignal[] = [];
+      let inPosition = true; // Start invested
       
       for (let i = 0; i < data.length; i++) {
         if (i < slowPeriod + signalPeriod || isNaN(macd[i]) || isNaN(signal[i])) {
@@ -353,13 +357,14 @@ export const strategies: Strategy[] = [
           continue;
         }
         
-        const prevAbove = macd[i - 1] > signal[i - 1];
-        const currAbove = macd[i] > signal[i];
+        const bullish = macd[i] > signal[i];
         
-        if (!prevAbove && currAbove) {
+        if (bullish && !inPosition) {
           signals.push('BUY');
-        } else if (prevAbove && !currAbove) {
+          inPosition = true;
+        } else if (!bullish && inPosition) {
           signals.push('SELL');
+          inPosition = false;
         } else {
           signals.push('HOLD');
         }
@@ -369,11 +374,11 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 4. ADX Trend Following
+  // 4. ADX Trend Following (Persistent signals)
   {
     id: 'adx_trend',
     name: 'ADX Trend Following',
-    description: 'Trade in trend direction when ADX shows strong trend (>25)',
+    description: 'Stay long in strong uptrends (ADX>threshold, +DI>-DI), exit otherwise',
     category: 'trend',
     parameters: [
       { id: 'period', name: 'ADX Period', defaultValue: 14, min: 7, max: 28, step: 1 },
@@ -385,6 +390,7 @@ export const strategies: Strategy[] = [
       
       const { adx, plusDI, minusDI } = calculateADX(data, period);
       const signals: StrategySignal[] = [];
+      let inPosition = true; // Start invested
       
       for (let i = 0; i < data.length; i++) {
         if (i < period * 2 || isNaN(adx[i])) {
@@ -392,14 +398,18 @@ export const strategies: Strategy[] = [
           continue;
         }
         
-        const strongTrend = adx[i] > threshold;
-        const bullish = plusDI[i] > minusDI[i];
-        const prevBullish = plusDI[i - 1] > minusDI[i - 1];
+        // Bullish: strong trend AND uptrend direction
+        const bullish = adx[i] > threshold && plusDI[i] > minusDI[i];
+        // Also stay in if no strong trend (don't exit just because trend weakened)
+        const noStrongDowntrend = !(adx[i] > threshold && plusDI[i] < minusDI[i]);
         
-        if (strongTrend && bullish && !prevBullish) {
+        if (bullish && !inPosition) {
           signals.push('BUY');
-        } else if (strongTrend && !bullish && prevBullish) {
+          inPosition = true;
+        } else if (!noStrongDowntrend && inPosition) {
+          // Only exit on confirmed strong downtrend
           signals.push('SELL');
+          inPosition = false;
         } else {
           signals.push('HOLD');
         }
@@ -472,11 +482,11 @@ export const strategies: Strategy[] = [
   // NEW TREND-FOLLOWING STRATEGIES
   // ============================================
   
-  // 6. Dual Momentum (Antonacci)
+  // 6. Dual Momentum (Antonacci) - Persistent signals
   {
     id: 'dual_momentum',
     name: 'Dual Momentum',
-    description: 'Go long when absolute momentum positive AND relative to cash, else exit',
+    description: 'Stay long when absolute momentum positive AND better than cash, exit otherwise',
     category: 'trend',
     parameters: [
       { id: 'lookback', name: 'Lookback Period', defaultValue: 200, min: 60, max: 252, step: 20 },
@@ -489,6 +499,7 @@ export const strategies: Strategy[] = [
       
       const signals: StrategySignal[] = [];
       const momentum: number[] = [];
+      let inPosition = true; // Start invested
       
       for (let i = 0; i < data.length; i++) {
         if (i < lookback) {
@@ -498,7 +509,7 @@ export const strategies: Strategy[] = [
         }
         
         // Calculate momentum (return over lookback period)
-        const currentReturn = (data[i].close - data[lookback > i ? 0 : i - lookback].close) / data[i - lookback].close;
+        const currentReturn = (data[i].close - data[i - lookback].close) / data[i - lookback].close;
         const cashEquivalent = dailyCashReturn * lookback;
         
         momentum.push(currentReturn * 100); // Store as percentage
@@ -507,22 +518,15 @@ export const strategies: Strategy[] = [
         // Relative momentum: is asset return > cash?
         const absoluteMomentum = currentReturn > 0;
         const relativeMomentum = currentReturn > cashEquivalent;
+        const bullish = absoluteMomentum && relativeMomentum;
         
-        const prevReturn = i > lookback 
-          ? (data[i - 1].close - data[i - 1 - lookback].close) / data[i - 1 - lookback].close 
-          : 0;
-        const prevAbsolute = prevReturn > 0;
-        const prevRelative = prevReturn > cashEquivalent;
-        
-        // Enter when both momentums turn positive
-        if (absoluteMomentum && relativeMomentum && !(prevAbsolute && prevRelative)) {
+        if (bullish && !inPosition) {
           signals.push('BUY');
-        }
-        // Exit when either momentum turns negative
-        else if ((!absoluteMomentum || !relativeMomentum) && (prevAbsolute && prevRelative)) {
+          inPosition = true;
+        } else if (!bullish && inPosition) {
           signals.push('SELL');
-        }
-        else {
+          inPosition = false;
+        } else {
           signals.push('HOLD');
         }
       }
@@ -531,11 +535,11 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 7. Time Series Momentum (TSMOM)
+  // 7. Time Series Momentum (TSMOM) - Persistent signals
   {
     id: 'tsmom',
     name: 'Time Series Momentum',
-    description: 'Go long when N-period return is positive, exit when negative',
+    description: 'Stay long while N-period return is positive, exit when negative',
     category: 'trend',
     parameters: [
       { id: 'lookback', name: 'Lookback Period', defaultValue: 200, min: 20, max: 252, step: 20 },
@@ -544,6 +548,7 @@ export const strategies: Strategy[] = [
       const lookback = params.lookback || 200;
       const signals: StrategySignal[] = [];
       const returns: number[] = [];
+      let inPosition = true; // Start invested
       
       for (let i = 0; i < data.length; i++) {
         if (i < lookback) {
@@ -555,15 +560,13 @@ export const strategies: Strategy[] = [
         const currentReturn = (data[i].close - data[i - lookback].close) / data[i - lookback].close;
         returns.push(currentReturn * 100);
         
-        const prevReturn = i > lookback 
-          ? (data[i - 1].close - data[i - 1 - lookback].close) / data[i - 1 - lookback].close 
-          : 0;
-        
         // Simple rule: positive momentum = long, negative = exit
-        if (currentReturn > 0 && prevReturn <= 0) {
+        if (currentReturn > 0 && !inPosition) {
           signals.push('BUY');
-        } else if (currentReturn <= 0 && prevReturn > 0) {
+          inPosition = true;
+        } else if (currentReturn <= 0 && inPosition) {
           signals.push('SELL');
+          inPosition = false;
         } else {
           signals.push('HOLD');
         }

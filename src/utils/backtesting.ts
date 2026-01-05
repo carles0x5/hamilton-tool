@@ -102,8 +102,9 @@ export function runBacktest(
   const trades: Trade[] = [];
   const equityCurve: { date: string; strategy: number; buyAndHold: number; drawdown: number }[] = [];
   
-  // Buy and hold tracking
-  const buyAndHoldShares = initialCapital / data[0].close;
+  // Buy and hold tracking - apply same initial transaction cost for fair comparison
+  const buyAndHoldCapitalAfterCost = initialCapital * (1 - transactionCost / 100);
+  const buyAndHoldShares = buyAndHoldCapitalAfterCost / data[0].close;
   let peakEquity = initialCapital;
   
   // Process each day
