@@ -85,7 +85,7 @@ function App() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <BarChart3 className="w-8 h-8" />
-              <h1 className="text-3xl font-bold">Hamilton Market Analyzer</h1>
+              <h1 className="text-3xl font-bold">Market Analyzer</h1>
             </div>
           </div>
         </div>

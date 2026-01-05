@@ -8,7 +8,6 @@ import {
   Legend,
   BarChart,
   Bar,
-  Cell,
   ReferenceLine,
 } from 'recharts';
 import { OHLCVData, MarketData } from '../../utils/types';
@@ -32,12 +31,14 @@ import {
   Layers,
   Zap,
   Play,
-  CheckCircle,
-  XCircle,
   AlertCircle,
   Loader2,
   Sliders,
   Search,
+  TrendingUp,
+  TrendingDown,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react';
 
 interface OptimizationTabProps {
@@ -141,11 +142,11 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
   const rankingChartData = useMemo(() => {
     return results.map((r, idx) => ({
       name: r.strategyName,
-      avgReturn: r.avgTestReturn,
-      consistency: r.consistencyScore,
-      sharpe: r.avgTestSharpe,
+      strategyReturn: r.totalStrategyReturn,
+      buyHoldReturn: r.totalBuyHoldReturn,
+      excessReturn: r.excessReturn,
       color: STRATEGY_COLORS[idx % STRATEGY_COLORS.length],
-    })).sort((a, b) => b.avgReturn - a.avgReturn);
+    })).sort((a, b) => b.excessReturn - a.excessReturn);
   }, [results]);
 
   // Window results chart for active strategy
@@ -336,7 +337,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
           <div className="card p-4">
             <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Award className="w-5 h-5 text-blue-600" />
-              Strategy Ranking (Out-of-Sample Performance)
+              Strategy Ranking (Out-of-Sample Performance vs Buy & Hold)
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -344,17 +345,18 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                   <tr>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700">Rank</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700">Strategy</th>
-                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Avg OOS Return</th>
-                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Avg Sharpe</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Total Return</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Buy & Hold</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Excess Return</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Win Rate vs B&H</th>
                     <th className="text-right py-2 px-3 font-semibold text-gray-700">Consistency</th>
-                    <th className="text-right py-2 px-3 font-semibold text-gray-700">Overfit Ratio</th>
-                    <th className="text-center py-2 px-3 font-semibold text-gray-700">Significant</th>
+                    <th className="text-center py-2 px-3 font-semibold text-gray-700">Recommendable</th>
                     <th className="text-left py-2 px-3 font-semibold text-gray-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {results
-                    .sort((a, b) => b.avgTestReturn - a.avgTestReturn)
+                    .sort((a, b) => b.excessReturn - a.excessReturn)
                     .map((result, idx) => {
                       const color = STRATEGY_COLORS[strategies.findIndex(s => s.id === result.strategyId) % STRATEGY_COLORS.length];
                       const isActive = activeResult?.strategyId === result.strategyId;
@@ -373,23 +375,29 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                             </span>
                           </td>
                           <td className="py-2 px-3 font-semibold text-gray-900">{result.strategyName}</td>
-                          <td className={`py-2 px-3 text-right font-bold tabular-nums ${result.avgTestReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatPercent(result.avgTestReturn)}
+                          <td className={`py-2 px-3 text-right font-bold tabular-nums ${result.totalStrategyReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatPercent(result.totalStrategyReturn)}
                           </td>
-                          <td className={`py-2 px-3 text-right tabular-nums ${result.avgTestSharpe >= 1 ? 'text-green-600 font-semibold' : 'text-gray-700'}`}>
-                            {formatNumber(result.avgTestSharpe)}
+                          <td className={`py-2 px-3 text-right tabular-nums ${result.totalBuyHoldReturn >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                            {formatPercent(result.totalBuyHoldReturn)}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <span className={`inline-flex items-center gap-1 font-bold tabular-nums ${result.excessReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {result.excessReturn >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                              {formatPercent(result.excessReturn)}
+                            </span>
+                          </td>
+                          <td className={`py-2 px-3 text-right tabular-nums ${result.winRateVsBuyHold >= 50 ? 'text-green-600 font-semibold' : 'text-amber-600'}`}>
+                            {formatNumber(result.winRateVsBuyHold)}%
                           </td>
                           <td className={`py-2 px-3 text-right tabular-nums ${result.consistencyScore >= 60 ? 'text-green-600' : 'text-amber-600'}`}>
                             {formatNumber(result.consistencyScore)}%
                           </td>
-                          <td className={`py-2 px-3 text-right tabular-nums ${result.overfitRatio > 2 ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
-                            {formatNumber(result.overfitRatio)}x
-                          </td>
                           <td className="py-2 px-3 text-center">
-                            {result.isStatisticallySignificant ? (
-                              <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
+                            {result.recommendable ? (
+                              <ThumbsUp className="w-5 h-5 text-green-600 mx-auto" />
                             ) : (
-                              <XCircle className="w-5 h-5 text-red-500 mx-auto" />
+                              <ThumbsDown className="w-5 h-5 text-red-500 mx-auto" />
                             )}
                           </td>
                           <td className="py-2 px-3">
@@ -410,13 +418,25 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                 </tbody>
               </table>
             </div>
+            
+            {/* Legend */}
+            <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
+              <span className="flex items-center gap-1">
+                <ThumbsUp className="w-3 h-3 text-green-600" />
+                Recommendable: Beats B&H in majority of windows with positive excess return
+              </span>
+              <span className="flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-green-600" />
+                Excess Return: Strategy return minus Buy & Hold return
+              </span>
+            </div>
           </div>
 
           {/* Ranking Chart */}
           <div className="card p-4">
             <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-blue-600" />
-              Out-of-Sample Returns Comparison
+              Strategy vs Buy & Hold (Out-of-Sample Returns)
             </h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={rankingChartData} margin={{ top: 10, right: 30, left: 10, bottom: 60 }}>
@@ -424,12 +444,10 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} angle={-45} textAnchor="end" height={80} />
                 <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `${v.toFixed(0)}%`} />
                 <Tooltip content={<CustomTooltip />} />
+                <Legend />
                 <ReferenceLine y={0} stroke="#94a3b8" />
-                <Bar dataKey="avgReturn" name="Avg OOS Return (%)" radius={[4, 4, 0, 0]}>
-                  {rankingChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.avgReturn >= 0 ? '#10b981' : '#ef4444'} />
-                  ))}
-                </Bar>
+                <Bar dataKey="strategyReturn" name="Strategy Return (%)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="buyHoldReturn" name="Buy & Hold (%)" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -443,6 +461,33 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                   <Activity className="w-5 h-5 text-blue-600" />
                   {activeResult.strategyName} - Optimization Details
                 </h3>
+                
+                {/* Buy & Hold Comparison Banner */}
+                {activeResult.recommendable ? (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2">
+                    <ThumbsUp className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-green-800">Strategy Beats Buy & Hold</p>
+                      <p className="text-sm text-green-700">
+                        Excess return of {formatPercent(activeResult.excessReturn)} with {formatNumber(activeResult.winRateVsBuyHold)}% win rate vs B&H across test windows.
+                        This strategy is recommended for use.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <ThumbsDown className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-red-800">Buy & Hold Outperforms This Strategy</p>
+                      <p className="text-sm text-red-700">
+                        {activeResult.excessReturn < 0 
+                          ? `Strategy underperforms B&H by ${formatPercent(Math.abs(activeResult.excessReturn))}.`
+                          : `Only beats B&H in ${formatNumber(activeResult.winRateVsBuyHold)}% of windows.`}
+                        {' '}Consider using Buy & Hold or a different strategy.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Warnings */}
                 {activeResult.overfitRatio > 2 && (
@@ -474,11 +519,29 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                 </div>
 
                 {/* Metrics Summary */}
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
+                  <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                    <div className="text-xs text-green-600 mb-1">Total Strategy</div>
+                    <div className={`text-lg font-bold tabular-nums ${activeResult.totalStrategyReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatPercent(activeResult.totalStrategyReturn)}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="text-xs text-blue-600 mb-1">Total Buy & Hold</div>
+                    <div className={`text-lg font-bold tabular-nums ${activeResult.totalBuyHoldReturn >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                      {formatPercent(activeResult.totalBuyHoldReturn)}
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-lg border ${activeResult.excessReturn >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className={`text-xs mb-1 ${activeResult.excessReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>Excess Return</div>
+                    <div className={`text-lg font-bold tabular-nums ${activeResult.excessReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatPercent(activeResult.excessReturn)}
+                    </div>
+                  </div>
                   <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <div className="text-xs text-gray-500 mb-1">Avg OOS Return</div>
-                    <div className={`text-lg font-bold tabular-nums ${activeResult.avgTestReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {formatPercent(activeResult.avgTestReturn)}
+                    <div className="text-xs text-gray-500 mb-1">Win Rate vs B&H</div>
+                    <div className={`text-lg font-bold tabular-nums ${activeResult.winRateVsBuyHold >= 50 ? 'text-green-600' : 'text-amber-600'}`}>
+                      {formatNumber(activeResult.winRateVsBuyHold)}%
                     </div>
                   </div>
                   <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -491,12 +554,6 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                     <div className="text-xs text-gray-500 mb-1">Avg Max DD</div>
                     <div className="text-lg font-bold tabular-nums text-red-600">
                       -{formatNumber(activeResult.avgTestDrawdown)}%
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <div className="text-xs text-gray-500 mb-1">Total Trades</div>
-                    <div className="text-lg font-bold tabular-nums text-gray-900">
-                      {activeResult.totalTestTrades}
                     </div>
                   </div>
                   <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -530,43 +587,51 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
 
               {/* Window Details Table */}
               <div className="card p-4">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Window-by-Window Results</h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Window-by-Window Results vs Buy & Hold</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="text-left py-2 px-3 font-semibold text-gray-700">Window</th>
-                        <th className="text-left py-2 px-3 font-semibold text-gray-700">Train Period</th>
                         <th className="text-left py-2 px-3 font-semibold text-gray-700">Test Period</th>
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Train {getMetricDisplayName(optimizationMetric)}</th>
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Test {getMetricDisplayName(optimizationMetric)}</th>
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Test Return</th>
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Test DD</th>
+                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Strategy Return</th>
+                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Buy & Hold</th>
+                        <th className="text-center py-2 px-3 font-semibold text-gray-700">Winner</th>
+                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Test Sharpe</th>
+                        <th className="text-right py-2 px-3 font-semibold text-gray-700">Max DD</th>
                         <th className="text-right py-2 px-3 font-semibold text-gray-700">Trades</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {activeResult.windowResults.map((w) => (
-                        <tr key={w.windowIndex} className="hover:bg-gray-50">
+                        <tr key={w.windowIndex} className={`hover:bg-gray-50 ${w.beatsBuyHold ? 'bg-green-50/50' : 'bg-red-50/50'}`}>
                           <td className="py-2 px-3 font-semibold text-gray-900">W{w.windowIndex + 1}</td>
-                          <td className="py-2 px-3 text-gray-600 text-xs">
-                            {format(new Date(w.trainStart), 'MMM dd')} - {format(new Date(w.trainEnd), 'MMM dd')}
-                            <br />
-                            <span className="text-gray-400">({w.trainPeriods} days)</span>
-                          </td>
                           <td className="py-2 px-3 text-gray-600 text-xs">
                             {format(new Date(w.testStart), 'MMM dd')} - {format(new Date(w.testEnd), 'MMM dd')}
                             <br />
                             <span className="text-gray-400">({w.testPeriods} days)</span>
                           </td>
-                          <td className="py-2 px-3 text-right tabular-nums text-blue-600 font-medium">
-                            {formatNumber(w.trainMetric)}
-                          </td>
-                          <td className="py-2 px-3 text-right tabular-nums text-green-600 font-medium">
-                            {formatNumber(w.testMetric)}
-                          </td>
                           <td className={`py-2 px-3 text-right tabular-nums font-bold ${w.testReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatPercent(w.testReturn)}
+                          </td>
+                          <td className={`py-2 px-3 text-right tabular-nums font-medium ${w.buyHoldReturn >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                            {formatPercent(w.buyHoldReturn)}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            {w.beatsBuyHold ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                <TrendingUp className="w-3 h-3" />
+                                Strategy
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                                <TrendingDown className="w-3 h-3" />
+                                B&H
+                              </span>
+                            )}
+                          </td>
+                          <td className={`py-2 px-3 text-right tabular-nums ${w.testSharpe >= 1 ? 'text-green-600 font-semibold' : 'text-gray-700'}`}>
+                            {formatNumber(w.testSharpe)}
                           </td>
                           <td className="py-2 px-3 text-right tabular-nums text-red-600">
                             -{formatNumber(w.testMaxDrawdown)}%
@@ -577,6 +642,38 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="bg-gray-100 border-t-2 border-gray-300">
+                      <tr className="font-semibold">
+                        <td className="py-2 px-3 text-gray-900">Total</td>
+                        <td className="py-2 px-3 text-gray-600">All Windows</td>
+                        <td className={`py-2 px-3 text-right tabular-nums ${activeResult.totalStrategyReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatPercent(activeResult.totalStrategyReturn)}
+                        </td>
+                        <td className={`py-2 px-3 text-right tabular-nums ${activeResult.totalBuyHoldReturn >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                          {formatPercent(activeResult.totalBuyHoldReturn)}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          {activeResult.excessReturn >= 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-green-200 text-green-800">
+                              Strategy +{formatNumber(activeResult.excessReturn)}%
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-800">
+                              B&H +{formatNumber(Math.abs(activeResult.excessReturn))}%
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-gray-700">
+                          {formatNumber(activeResult.avgTestSharpe)}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-red-600">
+                          -{formatNumber(activeResult.avgTestDrawdown)}%
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-gray-700">
+                          {activeResult.totalTestTrades}
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>

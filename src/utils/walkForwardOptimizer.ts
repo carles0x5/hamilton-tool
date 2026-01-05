@@ -30,6 +30,9 @@ export interface WindowResult {
   testSharpe: number;
   testMaxDrawdown: number;
   testTrades: number;
+  // Buy & Hold comparison
+  buyHoldReturn: number;
+  beatsBuyHold: boolean;
 }
 
 export interface OptimizationResult {
@@ -60,6 +63,14 @@ export interface OptimizationResult {
   // Statistical significance
   isStatisticallySignificant: boolean;
   consistencyScore: number;  // % of windows with positive test return
+  
+  // Buy & Hold comparison
+  avgBuyHoldReturn: number;  // Average B&H return across test windows
+  totalBuyHoldReturn: number;  // Cumulative B&H return across all test windows
+  totalStrategyReturn: number;  // Cumulative strategy return across all test windows
+  winRateVsBuyHold: number;  // % of windows where strategy beats B&H
+  excessReturn: number;  // Strategy total return - B&H total return
+  recommendable: boolean;  // True if strategy beats B&H with statistical significance
 }
 
 export interface MultiStrategyOptimizationResult {
@@ -256,6 +267,12 @@ export function runWalkForwardOptimization(
     
     const testMetric = getMetricValue(testResult, cfg.optimizationMetric);
     
+    // Calculate Buy & Hold return for this test window
+    const testStartPrice = test[0].close;
+    const testEndPrice = test[test.length - 1].close;
+    const buyHoldReturn = ((testEndPrice - testStartPrice) / testStartPrice) * 100;
+    const beatsBuyHold = testResult.totalReturn > buyHoldReturn;
+    
     // Track parameter selections for consensus
     for (const [paramId, value] of Object.entries(bestParams)) {
       if (!paramCounts[paramId]) paramCounts[paramId] = {};
@@ -290,6 +307,8 @@ export function runWalkForwardOptimization(
       testSharpe: testResult.sharpeRatio,
       testMaxDrawdown: testResult.maxDrawdown,
       testTrades: testResult.totalTrades,
+      buyHoldReturn,
+      beatsBuyHold,
     });
   }
   
@@ -324,6 +343,21 @@ export function runWalkForwardOptimization(
   // Statistical significance check (require at least 60% positive windows and positive avg return)
   const isStatisticallySignificant = consistencyScore >= 60 && avgTestReturn > 0;
   
+  // Buy & Hold comparison metrics
+  const avgBuyHoldReturn = windowResults.reduce((sum, w) => sum + w.buyHoldReturn, 0) / windowResults.length;
+  const windowsBeatingBH = windowResults.filter(w => w.beatsBuyHold).length;
+  const winRateVsBuyHold = (windowsBeatingBH / windowResults.length) * 100;
+  
+  // Calculate cumulative returns (compound across windows)
+  const totalStrategyReturn = windowResults.reduce((acc, w) => acc * (1 + w.testReturn / 100), 1);
+  const totalBuyHoldReturn = windowResults.reduce((acc, w) => acc * (1 + w.buyHoldReturn / 100), 1);
+  const totalStrategyReturnPct = (totalStrategyReturn - 1) * 100;
+  const totalBuyHoldReturnPct = (totalBuyHoldReturn - 1) * 100;
+  const excessReturn = totalStrategyReturnPct - totalBuyHoldReturnPct;
+  
+  // Strategy is recommendable if it beats B&H in majority of windows AND overall
+  const recommendable = winRateVsBuyHold >= 50 && excessReturn > 0 && isStatisticallySignificant;
+  
   return {
     strategyId: strategy.id,
     strategyName: strategy.name,
@@ -340,6 +374,12 @@ export function runWalkForwardOptimization(
     combinedEquityCurve,
     isStatisticallySignificant,
     consistencyScore,
+    avgBuyHoldReturn,
+    totalBuyHoldReturn: totalBuyHoldReturnPct,
+    totalStrategyReturn: totalStrategyReturnPct,
+    winRateVsBuyHold,
+    excessReturn,
+    recommendable,
   };
 }
 
