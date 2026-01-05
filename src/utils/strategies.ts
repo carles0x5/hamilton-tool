@@ -1,5 +1,6 @@
-import { MarketData } from './types';
+import { MarketData, CalculationMethod } from './types';
 import { createTradingSignal } from './diagramLogic';
+import { calculateForces } from './calculations';
 
 export type StrategySignal = 'BUY' | 'SELL' | 'HOLD';
 
@@ -259,24 +260,52 @@ export const strategies: Strategy[] = [
     category: 'hybrid',
     parameters: [
       { id: 'threshold', name: 'Threshold', defaultValue: 30, min: 10, max: 50, step: 5 },
+      { id: 'method', name: 'Force Calculation (1=MFI, 2=PVM, 3=Momentum, 4=A/D)', defaultValue: 2, min: 1, max: 4, step: 1 },
     ],
     calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
       const threshold = params.threshold || 30;
-      const signals: StrategySignal[] = [];
+      const methodNum = params.method || 2;
       
-      for (let i = 0; i < data.length; i++) {
-        const signal = createTradingSignal(data[i].demand, data[i].supply, threshold);
+      // Map number to calculation method
+      const methodMap: Record<number, CalculationMethod> = {
+        1: 'A', // MFI
+        2: 'B', // PVM (default)
+        3: 'C', // Momentum
+        4: 'D', // A/D
+      };
+      const method = methodMap[methodNum] || 'B';
+      
+      // Recalculate forces using selected method
+      const dataWithForces = calculateForces(data, method);
+      
+      const signals: StrategySignal[] = [];
+      let inPosition = true; // Start invested
+      
+      for (let i = 0; i < dataWithForces.length; i++) {
+        const hamiltonSignal = createTradingSignal(dataWithForces[i].demand, dataWithForces[i].supply, threshold);
         
-        if (signal.action === 'LONG' || signal.action === 'ACCUMULATE') {
+        // Convert Hamilton signal to persistent trading signal
+        const isBullish = hamiltonSignal.action === 'LONG' || hamiltonSignal.action === 'ACCUMULATE';
+        const isBearish = hamiltonSignal.action === 'SHORT' || hamiltonSignal.action === 'EXIT_LONG' || hamiltonSignal.action === 'REDUCE';
+        
+        if (isBullish && !inPosition) {
           signals.push('BUY');
-        } else if (signal.action === 'SHORT' || signal.action === 'EXIT_LONG' || signal.action === 'REDUCE') {
+          inPosition = true;
+        } else if (isBearish && inPosition) {
           signals.push('SELL');
+          inPosition = false;
         } else {
           signals.push('HOLD');
         }
       }
       
-      return { signals, indicators: {} };
+      return { 
+        signals, 
+        indicators: { 
+          demand: dataWithForces.map(d => d.demand),
+          supply: dataWithForces.map(d => d.supply),
+        } 
+      };
     },
   },
   
