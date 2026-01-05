@@ -12,7 +12,7 @@ export interface Strategy {
   id: string;
   name: string;
   description: string;
-  category: 'trend' | 'momentum' | 'mean-reversion' | 'hybrid';
+  category: 'trend' | 'momentum' | 'hybrid';
   parameters: StrategyParameter[];
   calculate: (data: MarketData[], params: Record<string, number>) => StrategyResult;
 }
@@ -26,7 +26,10 @@ export interface StrategyParameter {
   step: number;
 }
 
+// ============================================
 // Helper functions for technical indicators
+// ============================================
+
 function calculateSMA(data: number[], period: number): number[] {
   const result: number[] = [];
   for (let i = 0; i < data.length; i++) {
@@ -57,48 +60,6 @@ function calculateEMA(data: number[], period: number): number[] {
   return result;
 }
 
-function calculateRSI(data: MarketData[], period: number): number[] {
-  const result: number[] = [];
-  const gains: number[] = [];
-  const losses: number[] = [];
-  
-  for (let i = 0; i < data.length; i++) {
-    if (i === 0) {
-      gains.push(0);
-      losses.push(0);
-      result.push(50);
-      continue;
-    }
-    
-    const change = data[i].close - data[i - 1].close;
-    gains.push(Math.max(0, change));
-    losses.push(Math.max(0, -change));
-    
-    if (i < period) {
-      result.push(50);
-      continue;
-    }
-    
-    let avgGain: number, avgLoss: number;
-    
-    if (i === period) {
-      avgGain = gains.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
-      avgLoss = losses.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
-    } else {
-      avgGain = gains.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
-      avgLoss = losses.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
-    }
-    
-    if (avgLoss === 0) {
-      result.push(100);
-    } else {
-      const rs = avgGain / avgLoss;
-      result.push(100 - (100 / (1 + rs)));
-    }
-  }
-  return result;
-}
-
 function calculateMACD(data: MarketData[], fastPeriod: number, slowPeriod: number, signalPeriod: number): { macd: number[]; signal: number[]; histogram: number[] } {
   const closes = data.map(d => d.close);
   const fastEMA = calculateEMA(closes, fastPeriod);
@@ -122,29 +83,6 @@ function calculateMACD(data: MarketData[], fastPeriod: number, slowPeriod: numbe
   const histogram = macd.map((m, i) => m - paddedSignal[i]);
   
   return { macd, signal: paddedSignal, histogram };
-}
-
-function calculateBollingerBands(data: MarketData[], period: number, stdDev: number): { upper: number[]; middle: number[]; lower: number[] } {
-  const closes = data.map(d => d.close);
-  const middle = calculateSMA(closes, period);
-  const upper: number[] = [];
-  const lower: number[] = [];
-  
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      upper.push(NaN);
-      lower.push(NaN);
-    } else {
-      const slice = closes.slice(i - period + 1, i + 1);
-      const mean = middle[i];
-      const variance = slice.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / period;
-      const std = Math.sqrt(variance);
-      upper.push(mean + stdDev * std);
-      lower.push(mean - stdDev * std);
-    }
-  }
-  
-  return { upper, middle, lower };
 }
 
 function calculateATR(data: MarketData[], period: number): number[] {
@@ -216,8 +154,103 @@ function calculateADX(data: MarketData[], period: number): { adx: number[]; plus
   return { adx, plusDI, minusDI };
 }
 
+// Keltner Channel calculation
+function calculateKeltnerChannel(data: MarketData[], emaPeriod: number, atrPeriod: number, multiplier: number): { upper: number[]; middle: number[]; lower: number[] } {
+  const closes = data.map(d => d.close);
+  const middle = calculateEMA(closes, emaPeriod);
+  const atr = calculateATR(data, atrPeriod);
+  
+  const upper: number[] = [];
+  const lower: number[] = [];
+  
+  for (let i = 0; i < data.length; i++) {
+    if (isNaN(middle[i]) || isNaN(atr[i])) {
+      upper.push(NaN);
+      lower.push(NaN);
+    } else {
+      upper.push(middle[i] + multiplier * atr[i]);
+      lower.push(middle[i] - multiplier * atr[i]);
+    }
+  }
+  
+  return { upper, middle, lower };
+}
+
+// Supertrend calculation
+function calculateSupertrend(data: MarketData[], period: number, multiplier: number): { supertrend: number[]; direction: number[] } {
+  const atr = calculateATR(data, period);
+  const supertrend: number[] = [];
+  const direction: number[] = []; // 1 = bullish, -1 = bearish
+  
+  for (let i = 0; i < data.length; i++) {
+    if (i < period || isNaN(atr[i])) {
+      supertrend.push(NaN);
+      direction.push(0);
+      continue;
+    }
+    
+    const hl2 = (data[i].high + data[i].low) / 2;
+    const basicUpperBand = hl2 + multiplier * atr[i];
+    const basicLowerBand = hl2 - multiplier * atr[i];
+    
+    if (i === period) {
+      // Initialize
+      supertrend.push(data[i].close > basicUpperBand ? basicLowerBand : basicUpperBand);
+      direction.push(data[i].close > basicUpperBand ? 1 : -1);
+      continue;
+    }
+    
+    const prevSupertrend = supertrend[i - 1];
+    const prevDirection = direction[i - 1];
+    
+    let finalUpperBand = basicUpperBand;
+    let finalLowerBand = basicLowerBand;
+    
+    // Adjust bands based on previous values
+    if (prevDirection === 1) {
+      finalLowerBand = Math.max(basicLowerBand, prevSupertrend);
+    } else {
+      finalUpperBand = Math.min(basicUpperBand, prevSupertrend);
+    }
+    
+    // Determine direction
+    let newDirection: number;
+    let newSupertrend: number;
+    
+    if (prevDirection === 1) {
+      if (data[i].close < finalLowerBand) {
+        newDirection = -1;
+        newSupertrend = finalUpperBand;
+      } else {
+        newDirection = 1;
+        newSupertrend = finalLowerBand;
+      }
+    } else {
+      if (data[i].close > finalUpperBand) {
+        newDirection = 1;
+        newSupertrend = finalLowerBand;
+      } else {
+        newDirection = -1;
+        newSupertrend = finalUpperBand;
+      }
+    }
+    
+    supertrend.push(newSupertrend);
+    direction.push(newDirection);
+  }
+  
+  return { supertrend, direction };
+}
+
+// ============================================
 // Strategy Definitions
+// ============================================
+
 export const strategies: Strategy[] = [
+  // ============================================
+  // KEPT STRATEGIES (Improved)
+  // ============================================
+  
   // 1. Hamilton Diagram Strategy
   {
     id: 'hamilton',
@@ -247,19 +280,19 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 2. Moving Average Crossover (Golden/Death Cross)
+  // 2. Moving Average Crossover (Faster response)
   {
     id: 'ma_crossover',
     name: 'Moving Average Crossover',
-    description: 'Buy when fast MA crosses above slow MA (golden cross), sell on death cross',
+    description: 'Buy when fast EMA crosses above slow EMA, sell on cross below',
     category: 'trend',
     parameters: [
-      { id: 'fastPeriod', name: 'Fast MA Period', defaultValue: 20, min: 5, max: 50, step: 5 },
-      { id: 'slowPeriod', name: 'Slow MA Period', defaultValue: 50, min: 20, max: 200, step: 10 },
+      { id: 'fastPeriod', name: 'Fast EMA Period', defaultValue: 10, min: 5, max: 30, step: 1 },
+      { id: 'slowPeriod', name: 'Slow EMA Period', defaultValue: 30, min: 15, max: 100, step: 5 },
     ],
     calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const fastPeriod = params.fastPeriod || 20;
-      const slowPeriod = params.slowPeriod || 50;
+      const fastPeriod = params.fastPeriod || 10;
+      const slowPeriod = params.slowPeriod || 30;
       const closes = data.map(d => d.close);
       
       const fastMA = calculateEMA(closes, fastPeriod);
@@ -295,45 +328,7 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 3. RSI Mean Reversion
-  {
-    id: 'rsi_reversion',
-    name: 'RSI Mean Reversion',
-    description: 'Buy when RSI is oversold (<30), sell when overbought (>70)',
-    category: 'mean-reversion',
-    parameters: [
-      { id: 'period', name: 'RSI Period', defaultValue: 14, min: 5, max: 30, step: 1 },
-      { id: 'oversold', name: 'Oversold Level', defaultValue: 30, min: 10, max: 40, step: 5 },
-      { id: 'overbought', name: 'Overbought Level', defaultValue: 70, min: 60, max: 90, step: 5 },
-    ],
-    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const period = params.period || 14;
-      const oversold = params.oversold || 30;
-      const overbought = params.overbought || 70;
-      
-      const rsi = calculateRSI(data, period);
-      const signals: StrategySignal[] = [];
-      
-      for (let i = 0; i < data.length; i++) {
-        if (i < period) {
-          signals.push('HOLD');
-          continue;
-        }
-        
-        if (rsi[i] < oversold && rsi[i - 1] >= oversold) {
-          signals.push('BUY');
-        } else if (rsi[i] > overbought && rsi[i - 1] <= overbought) {
-          signals.push('SELL');
-        } else {
-          signals.push('HOLD');
-        }
-      }
-      
-      return { signals, indicators: { rsi } };
-    },
-  },
-  
-  // 4. MACD Strategy
+  // 3. MACD Strategy
   {
     id: 'macd',
     name: 'MACD Crossover',
@@ -374,49 +369,7 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 5. Bollinger Bands Mean Reversion
-  {
-    id: 'bollinger',
-    name: 'Bollinger Bands',
-    description: 'Buy when price touches lower band, sell when it touches upper band',
-    category: 'mean-reversion',
-    parameters: [
-      { id: 'period', name: 'Period', defaultValue: 20, min: 10, max: 50, step: 5 },
-      { id: 'stdDev', name: 'Std Deviations', defaultValue: 2, min: 1, max: 3, step: 0.5 },
-    ],
-    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const period = params.period || 20;
-      const stdDev = params.stdDev || 2;
-      
-      const { upper, middle, lower } = calculateBollingerBands(data, period, stdDev);
-      const signals: StrategySignal[] = [];
-      
-      for (let i = 0; i < data.length; i++) {
-        if (i < period || isNaN(upper[i]) || isNaN(lower[i])) {
-          signals.push('HOLD');
-          continue;
-        }
-        
-        const price = data[i].close;
-        const prevPrice = data[i - 1].close;
-        
-        // Buy when price crosses below lower band and starts recovering
-        if (prevPrice <= lower[i - 1] && price > lower[i]) {
-          signals.push('BUY');
-        }
-        // Sell when price crosses above upper band and starts declining
-        else if (prevPrice >= upper[i - 1] && price < upper[i]) {
-          signals.push('SELL');
-        } else {
-          signals.push('HOLD');
-        }
-      }
-      
-      return { signals, indicators: { upper, middle, lower } };
-    },
-  },
-  
-  // 6. Trend Following (ADX + DI)
+  // 4. ADX Trend Following
   {
     id: 'adx_trend',
     name: 'ADX Trend Following',
@@ -456,42 +409,57 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 7. Breakout Strategy (Donchian Channel)
+  // 5. Donchian Breakout (Turtle Trading)
   {
-    id: 'breakout',
+    id: 'donchian_breakout',
     name: 'Donchian Breakout',
-    description: 'Buy on N-day high breakout, sell on N-day low breakdown',
+    description: 'Classic Turtle system: Buy on N-day high breakout, sell on N-day low',
     category: 'trend',
     parameters: [
-      { id: 'period', name: 'Lookback Period', defaultValue: 20, min: 10, max: 55, step: 5 },
+      { id: 'entryPeriod', name: 'Entry Lookback', defaultValue: 20, min: 10, max: 55, step: 5 },
+      { id: 'exitPeriod', name: 'Exit Lookback', defaultValue: 10, min: 5, max: 30, step: 5 },
     ],
     calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const period = params.period || 20;
+      const entryPeriod = params.entryPeriod || 20;
+      const exitPeriod = params.exitPeriod || 10;
       const signals: StrategySignal[] = [];
       const upperChannel: number[] = [];
       const lowerChannel: number[] = [];
       
+      let inPosition = false;
+      
       for (let i = 0; i < data.length; i++) {
-        if (i < period) {
+        if (i < entryPeriod) {
           signals.push('HOLD');
           upperChannel.push(NaN);
           lowerChannel.push(NaN);
           continue;
         }
         
-        const highs = data.slice(i - period, i).map(d => d.high);
-        const lows = data.slice(i - period, i).map(d => d.low);
-        const upper = Math.max(...highs);
-        const lower = Math.min(...lows);
+        // Entry channel (longer period)
+        const entryHighs = data.slice(i - entryPeriod, i).map(d => d.high);
+        const entryLows = data.slice(i - entryPeriod, i).map(d => d.low);
+        const entryUpper = Math.max(...entryHighs);
+        const entryLower = Math.min(...entryLows);
         
-        upperChannel.push(upper);
-        lowerChannel.push(lower);
+        // Exit channel (shorter period)
+        const exitLows = data.slice(Math.max(0, i - exitPeriod), i).map(d => d.low);
+        const exitLower = Math.min(...exitLows);
         
-        if (data[i].close > upper && data[i - 1].close <= data.slice(i - period - 1, i - 1).reduce((max, d) => Math.max(max, d.high), 0)) {
+        upperChannel.push(entryUpper);
+        lowerChannel.push(entryLower);
+        
+        // Breakout above entry channel = BUY
+        if (data[i].close > entryUpper && !inPosition) {
           signals.push('BUY');
-        } else if (data[i].close < lower && data[i - 1].close >= data.slice(i - period - 1, i - 1).reduce((min, d) => Math.min(min, d.low), Infinity)) {
+          inPosition = true;
+        }
+        // Break below exit channel = SELL (exit long)
+        else if (data[i].close < exitLower && inPosition) {
           signals.push('SELL');
-        } else {
+          inPosition = false;
+        }
+        else {
           signals.push('HOLD');
         }
       }
@@ -500,151 +468,380 @@ export const strategies: Strategy[] = [
     },
   },
   
-  // 8. Triple MA Strategy (Conservative)
+  // ============================================
+  // NEW TREND-FOLLOWING STRATEGIES
+  // ============================================
+  
+  // 6. Dual Momentum (Antonacci)
   {
-    id: 'triple_ma',
-    name: 'Triple Moving Average',
-    description: 'Buy when short > medium > long MA, sell when short < medium < long',
+    id: 'dual_momentum',
+    name: 'Dual Momentum',
+    description: 'Go long when absolute momentum positive AND relative to cash, else exit',
     category: 'trend',
     parameters: [
-      { id: 'shortPeriod', name: 'Short MA', defaultValue: 10, min: 5, max: 20, step: 1 },
-      { id: 'mediumPeriod', name: 'Medium MA', defaultValue: 20, min: 15, max: 50, step: 5 },
-      { id: 'longPeriod', name: 'Long MA', defaultValue: 50, min: 30, max: 200, step: 10 },
+      { id: 'lookback', name: 'Lookback Period', defaultValue: 200, min: 60, max: 252, step: 20 },
+      { id: 'cashReturn', name: 'Risk-Free Rate (%/yr)', defaultValue: 4, min: 0, max: 10, step: 0.5 },
     ],
     calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const shortPeriod = params.shortPeriod || 10;
-      const mediumPeriod = params.mediumPeriod || 20;
-      const longPeriod = params.longPeriod || 50;
-      const closes = data.map(d => d.close);
-      
-      const shortMA = calculateEMA(closes, shortPeriod);
-      const mediumMA = calculateEMA(closes, mediumPeriod);
-      const longMA = calculateEMA(closes, longPeriod);
+      const lookback = params.lookback || 200;
+      const cashReturn = (params.cashReturn || 4) / 100; // Annual rate
+      const dailyCashReturn = cashReturn / 252; // Daily equivalent
       
       const signals: StrategySignal[] = [];
+      const momentum: number[] = [];
       
       for (let i = 0; i < data.length; i++) {
-        if (i < longPeriod || isNaN(longMA[i])) {
+        if (i < lookback) {
           signals.push('HOLD');
+          momentum.push(NaN);
           continue;
         }
         
-        const bullish = shortMA[i] > mediumMA[i] && mediumMA[i] > longMA[i];
-        const bearish = shortMA[i] < mediumMA[i] && mediumMA[i] < longMA[i];
-        const prevBullish = shortMA[i - 1] > mediumMA[i - 1] && mediumMA[i - 1] > longMA[i - 1];
-        const prevBearish = shortMA[i - 1] < mediumMA[i - 1] && mediumMA[i - 1] < longMA[i - 1];
+        // Calculate momentum (return over lookback period)
+        const currentReturn = (data[i].close - data[lookback > i ? 0 : i - lookback].close) / data[i - lookback].close;
+        const cashEquivalent = dailyCashReturn * lookback;
         
-        if (bullish && !prevBullish) {
+        momentum.push(currentReturn * 100); // Store as percentage
+        
+        // Absolute momentum: is asset return positive?
+        // Relative momentum: is asset return > cash?
+        const absoluteMomentum = currentReturn > 0;
+        const relativeMomentum = currentReturn > cashEquivalent;
+        
+        const prevReturn = i > lookback 
+          ? (data[i - 1].close - data[i - 1 - lookback].close) / data[i - 1 - lookback].close 
+          : 0;
+        const prevAbsolute = prevReturn > 0;
+        const prevRelative = prevReturn > cashEquivalent;
+        
+        // Enter when both momentums turn positive
+        if (absoluteMomentum && relativeMomentum && !(prevAbsolute && prevRelative)) {
           signals.push('BUY');
-        } else if (bearish && !prevBearish) {
+        }
+        // Exit when either momentum turns negative
+        else if ((!absoluteMomentum || !relativeMomentum) && (prevAbsolute && prevRelative)) {
+          signals.push('SELL');
+        }
+        else {
+          signals.push('HOLD');
+        }
+      }
+      
+      return { signals, indicators: { momentum } };
+    },
+  },
+  
+  // 7. Time Series Momentum (TSMOM)
+  {
+    id: 'tsmom',
+    name: 'Time Series Momentum',
+    description: 'Go long when N-period return is positive, exit when negative',
+    category: 'trend',
+    parameters: [
+      { id: 'lookback', name: 'Lookback Period', defaultValue: 200, min: 20, max: 252, step: 20 },
+    ],
+    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
+      const lookback = params.lookback || 200;
+      const signals: StrategySignal[] = [];
+      const returns: number[] = [];
+      
+      for (let i = 0; i < data.length; i++) {
+        if (i < lookback) {
+          signals.push('HOLD');
+          returns.push(NaN);
+          continue;
+        }
+        
+        const currentReturn = (data[i].close - data[i - lookback].close) / data[i - lookback].close;
+        returns.push(currentReturn * 100);
+        
+        const prevReturn = i > lookback 
+          ? (data[i - 1].close - data[i - 1 - lookback].close) / data[i - 1 - lookback].close 
+          : 0;
+        
+        // Simple rule: positive momentum = long, negative = exit
+        if (currentReturn > 0 && prevReturn <= 0) {
+          signals.push('BUY');
+        } else if (currentReturn <= 0 && prevReturn > 0) {
           signals.push('SELL');
         } else {
           signals.push('HOLD');
         }
       }
       
-      return { signals, indicators: { shortMA, mediumMA, longMA } };
+      return { signals, indicators: { returns } };
     },
   },
   
-  // 9. RSI + MACD Combo
+  // 8. Keltner Channel Breakout
   {
-    id: 'rsi_macd_combo',
-    name: 'RSI + MACD Combo',
-    description: 'Buy when RSI oversold AND MACD bullish crossover, high conviction signals only',
-    category: 'hybrid',
+    id: 'keltner_breakout',
+    name: 'Keltner Channel Breakout',
+    description: 'Buy on breakout above upper Keltner band, sell below lower band',
+    category: 'trend',
     parameters: [
-      { id: 'rsiPeriod', name: 'RSI Period', defaultValue: 14, min: 7, max: 21, step: 1 },
-      { id: 'rsiOversold', name: 'RSI Oversold', defaultValue: 40, min: 20, max: 45, step: 5 },
-      { id: 'rsiOverbought', name: 'RSI Overbought', defaultValue: 60, min: 55, max: 80, step: 5 },
-    ],
-    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const rsiPeriod = params.rsiPeriod || 14;
-      const rsiOversold = params.rsiOversold || 40;
-      const rsiOverbought = params.rsiOverbought || 60;
-      
-      const rsi = calculateRSI(data, rsiPeriod);
-      const { macd, signal: macdSignal } = calculateMACD(data, 12, 26, 9);
-      
-      const signals: StrategySignal[] = [];
-      
-      for (let i = 0; i < data.length; i++) {
-        if (i < 35 || isNaN(rsi[i]) || isNaN(macd[i]) || isNaN(macdSignal[i])) {
-          signals.push('HOLD');
-          continue;
-        }
-        
-        const rsiLow = rsi[i] < rsiOversold;
-        const rsiHigh = rsi[i] > rsiOverbought;
-        const macdBullishCross = macd[i] > macdSignal[i] && macd[i - 1] <= macdSignal[i - 1];
-        const macdBearishCross = macd[i] < macdSignal[i] && macd[i - 1] >= macdSignal[i - 1];
-        const macdBullish = macd[i] > macdSignal[i];
-        const macdBearish = macd[i] < macdSignal[i];
-        
-        // Buy: RSI recovering from oversold + MACD bullish
-        if ((rsiLow || rsi[i - 1] < rsiOversold) && (macdBullishCross || macdBullish)) {
-          signals.push('BUY');
-        }
-        // Sell: RSI in overbought + MACD bearish
-        else if ((rsiHigh || rsi[i - 1] > rsiOverbought) && (macdBearishCross || macdBearish)) {
-          signals.push('SELL');
-        } else {
-          signals.push('HOLD');
-        }
-      }
-      
-      return { signals, indicators: { rsi, macd, macdSignal } };
-    },
-  },
-  
-  // 10. Mean Reversion with Volatility Filter
-  {
-    id: 'mean_reversion_vol',
-    name: 'Mean Reversion + Vol Filter',
-    description: 'Mean reversion trades only in low volatility environments',
-    category: 'mean-reversion',
-    parameters: [
-      { id: 'maPeriod', name: 'MA Period', defaultValue: 20, min: 10, max: 50, step: 5 },
+      { id: 'emaPeriod', name: 'EMA Period', defaultValue: 20, min: 10, max: 50, step: 5 },
       { id: 'atrPeriod', name: 'ATR Period', defaultValue: 14, min: 7, max: 21, step: 1 },
-      { id: 'deviations', name: 'Entry Deviations', defaultValue: 2, min: 1, max: 3, step: 0.5 },
+      { id: 'multiplier', name: 'ATR Multiplier', defaultValue: 2, min: 1, max: 4, step: 0.5 },
     ],
     calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
-      const maPeriod = params.maPeriod || 20;
+      const emaPeriod = params.emaPeriod || 20;
       const atrPeriod = params.atrPeriod || 14;
-      const deviations = params.deviations || 2;
+      const multiplier = params.multiplier || 2;
       
-      const closes = data.map(d => d.close);
-      const ma = calculateSMA(closes, maPeriod);
-      const atr = calculateATR(data, atrPeriod);
-      
-      // Calculate average ATR for volatility comparison
-      const avgAtr = calculateSMA(atr.filter(v => !isNaN(v)), 50);
-      
+      const { upper, middle, lower } = calculateKeltnerChannel(data, emaPeriod, atrPeriod, multiplier);
       const signals: StrategySignal[] = [];
       
+      let inPosition = false;
+      
       for (let i = 0; i < data.length; i++) {
-        if (i < 70 || isNaN(ma[i]) || isNaN(atr[i])) {
+        if (isNaN(upper[i]) || isNaN(lower[i])) {
           signals.push('HOLD');
           continue;
         }
         
-        const price = data[i].close;
-        const upperBand = ma[i] + deviations * atr[i];
-        const lowerBand = ma[i] - deviations * atr[i];
-        
-        // Only trade in low volatility (current ATR < average)
-        const lowVol = atr[i] < avgAtr[Math.min(avgAtr.length - 1, i - 20)] * 1.2;
-        
-        if (lowVol && price < lowerBand && data[i - 1].close >= ma[i - 1] - deviations * atr[i - 1]) {
+        // Breakout above upper band = BUY
+        if (data[i].close > upper[i] && data[i - 1]?.close <= upper[i - 1] && !inPosition) {
           signals.push('BUY');
-        } else if (lowVol && price > upperBand && data[i - 1].close <= ma[i - 1] + deviations * atr[i - 1]) {
+          inPosition = true;
+        }
+        // Break below middle = SELL (trend weakening)
+        else if (data[i].close < middle[i] && inPosition) {
           signals.push('SELL');
-        } else {
+          inPosition = false;
+        }
+        else {
           signals.push('HOLD');
         }
       }
       
-      return { signals, indicators: { ma, atr } };
+      return { signals, indicators: { upper, middle, lower } };
+    },
+  },
+  
+  // 9. Supertrend Strategy
+  {
+    id: 'supertrend',
+    name: 'Supertrend',
+    description: 'ATR-based trend following with automatic support/resistance flipping',
+    category: 'trend',
+    parameters: [
+      { id: 'period', name: 'ATR Period', defaultValue: 10, min: 5, max: 20, step: 1 },
+      { id: 'multiplier', name: 'Multiplier', defaultValue: 3, min: 1, max: 5, step: 0.5 },
+    ],
+    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
+      const period = params.period || 10;
+      const multiplier = params.multiplier || 3;
+      
+      const { supertrend, direction } = calculateSupertrend(data, period, multiplier);
+      const signals: StrategySignal[] = [];
+      
+      for (let i = 0; i < data.length; i++) {
+        if (i < period + 1 || direction[i] === 0) {
+          signals.push('HOLD');
+          continue;
+        }
+        
+        // Direction flip from bearish to bullish
+        if (direction[i] === 1 && direction[i - 1] === -1) {
+          signals.push('BUY');
+        }
+        // Direction flip from bullish to bearish
+        else if (direction[i] === -1 && direction[i - 1] === 1) {
+          signals.push('SELL');
+        }
+        else {
+          signals.push('HOLD');
+        }
+      }
+      
+      return { signals, indicators: { supertrend, direction } };
+    },
+  },
+  
+  // 10. Volatility Breakout (Larry Williams)
+  {
+    id: 'volatility_breakout',
+    name: 'Volatility Breakout',
+    description: 'Enter when price moves N x ATR from open, capturing momentum days',
+    category: 'momentum',
+    parameters: [
+      { id: 'atrPeriod', name: 'ATR Period', defaultValue: 14, min: 7, max: 21, step: 1 },
+      { id: 'multiplier', name: 'Breakout Multiplier', defaultValue: 0.5, min: 0.2, max: 1.5, step: 0.1 },
+    ],
+    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
+      const atrPeriod = params.atrPeriod || 14;
+      const multiplier = params.multiplier || 0.5;
+      
+      const atr = calculateATR(data, atrPeriod);
+      const signals: StrategySignal[] = [];
+      const breakoutLevels: number[] = [];
+      
+      let inPosition = false;
+      let entryPrice = 0;
+      
+      for (let i = 0; i < data.length; i++) {
+        if (i < atrPeriod || isNaN(atr[i - 1])) {
+          signals.push('HOLD');
+          breakoutLevels.push(NaN);
+          continue;
+        }
+        
+        // Calculate breakout level from yesterday's close
+        const breakoutUp = data[i - 1].close + multiplier * atr[i - 1];
+        const breakoutDown = data[i - 1].close - multiplier * atr[i - 1];
+        breakoutLevels.push(breakoutUp);
+        
+        // Upside breakout
+        if (data[i].high > breakoutUp && !inPosition) {
+          signals.push('BUY');
+          inPosition = true;
+          entryPrice = breakoutUp;
+        }
+        // Exit on downside breakout or significant reversal
+        else if (inPosition && data[i].low < breakoutDown) {
+          signals.push('SELL');
+          inPosition = false;
+        }
+        // Trailing exit: if price drops below entry - 2*ATR
+        else if (inPosition && data[i].close < entryPrice - 2 * atr[i]) {
+          signals.push('SELL');
+          inPosition = false;
+        }
+        else {
+          signals.push('HOLD');
+        }
+      }
+      
+      return { signals, indicators: { atr, breakoutLevels } };
+    },
+  },
+  
+  // 11. Momentum Breakout with Volume Confirmation
+  {
+    id: 'volume_breakout',
+    name: 'Volume Breakout',
+    description: 'Donchian breakout confirmed by above-average volume',
+    category: 'trend',
+    parameters: [
+      { id: 'breakoutPeriod', name: 'Breakout Period', defaultValue: 20, min: 10, max: 55, step: 5 },
+      { id: 'volumePeriod', name: 'Volume MA Period', defaultValue: 20, min: 10, max: 50, step: 5 },
+      { id: 'volumeMultiplier', name: 'Volume Multiplier', defaultValue: 1.5, min: 1, max: 3, step: 0.25 },
+    ],
+    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
+      const breakoutPeriod = params.breakoutPeriod || 20;
+      const volumePeriod = params.volumePeriod || 20;
+      const volumeMultiplier = params.volumeMultiplier || 1.5;
+      
+      const volumes = data.map(d => d.volume);
+      const volumeMA = calculateSMA(volumes, volumePeriod);
+      
+      const signals: StrategySignal[] = [];
+      const upperChannel: number[] = [];
+      const lowerChannel: number[] = [];
+      
+      let inPosition = false;
+      
+      for (let i = 0; i < data.length; i++) {
+        if (i < Math.max(breakoutPeriod, volumePeriod)) {
+          signals.push('HOLD');
+          upperChannel.push(NaN);
+          lowerChannel.push(NaN);
+          continue;
+        }
+        
+        const highs = data.slice(i - breakoutPeriod, i).map(d => d.high);
+        const lows = data.slice(i - breakoutPeriod, i).map(d => d.low);
+        const upper = Math.max(...highs);
+        const lower = Math.min(...lows);
+        
+        upperChannel.push(upper);
+        lowerChannel.push(lower);
+        
+        const highVolume = data[i].volume > volumeMA[i] * volumeMultiplier;
+        
+        // Breakout with volume confirmation
+        if (data[i].close > upper && highVolume && !inPosition) {
+          signals.push('BUY');
+          inPosition = true;
+        }
+        // Exit on breakdown
+        else if (data[i].close < lower && inPosition) {
+          signals.push('SELL');
+          inPosition = false;
+        }
+        else {
+          signals.push('HOLD');
+        }
+      }
+      
+      return { signals, indicators: { upperChannel, lowerChannel, volumeMA } };
+    },
+  },
+  
+  // 12. Trend Strength Filter Strategy
+  {
+    id: 'trend_strength',
+    name: 'Trend Strength Filter',
+    description: 'Long only when ADX strong AND price above 200 EMA, with ATR trailing stop',
+    category: 'trend',
+    parameters: [
+      { id: 'trendPeriod', name: 'Trend EMA', defaultValue: 200, min: 100, max: 300, step: 20 },
+      { id: 'adxPeriod', name: 'ADX Period', defaultValue: 14, min: 7, max: 28, step: 1 },
+      { id: 'adxThreshold', name: 'ADX Threshold', defaultValue: 20, min: 15, max: 35, step: 5 },
+      { id: 'atrStopMultiplier', name: 'ATR Stop Multiplier', defaultValue: 2, min: 1, max: 4, step: 0.5 },
+    ],
+    calculate: (data: MarketData[], params: Record<string, number>): StrategyResult => {
+      const trendPeriod = params.trendPeriod || 200;
+      const adxPeriod = params.adxPeriod || 14;
+      const adxThreshold = params.adxThreshold || 20;
+      const atrStopMultiplier = params.atrStopMultiplier || 2;
+      
+      const closes = data.map(d => d.close);
+      const trendEMA = calculateEMA(closes, trendPeriod);
+      const { adx, plusDI, minusDI } = calculateADX(data, adxPeriod);
+      const atr = calculateATR(data, adxPeriod);
+      
+      const signals: StrategySignal[] = [];
+      
+      let inPosition = false;
+      let trailingStop = 0;
+      
+      for (let i = 0; i < data.length; i++) {
+        if (i < trendPeriod || isNaN(trendEMA[i]) || isNaN(adx[i])) {
+          signals.push('HOLD');
+          continue;
+        }
+        
+        const aboveTrend = data[i].close > trendEMA[i];
+        const strongTrend = adx[i] > adxThreshold;
+        const bullishDI = plusDI[i] > minusDI[i];
+        
+        // All conditions met: enter
+        if (aboveTrend && strongTrend && bullishDI && !inPosition) {
+          signals.push('BUY');
+          inPosition = true;
+          trailingStop = data[i].close - atrStopMultiplier * atr[i];
+        }
+        // Update trailing stop if in position
+        else if (inPosition) {
+          const newStop = data[i].close - atrStopMultiplier * atr[i];
+          trailingStop = Math.max(trailingStop, newStop);
+          
+          // Exit if price falls below trailing stop or trend breaks
+          if (data[i].close < trailingStop || !aboveTrend) {
+            signals.push('SELL');
+            inPosition = false;
+          } else {
+            signals.push('HOLD');
+          }
+        }
+        else {
+          signals.push('HOLD');
+        }
+      }
+      
+      return { signals, indicators: { trendEMA, adx, plusDI, minusDI } };
     },
   },
 ];
@@ -656,4 +853,3 @@ export function getStrategyById(id: string): Strategy | undefined {
 export function getStrategiesByCategory(category: Strategy['category']): Strategy[] {
   return strategies.filter(s => s.category === category);
 }
-
