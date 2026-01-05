@@ -91,14 +91,21 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
   const [showSettings, setShowSettings] = useState(false);
   
   // Selected strategies for optimization
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(['ma_crossover', 'rsi_reversion', 'macd']);
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(['ma_crossover', 'macd', 'tsmom']);
   
   // Results state
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<OptimizationResult[]>([]);
   const [activeResult, setActiveResult] = useState<OptimizationResult | null>(null);
 
+  // Clear results when any setting changes (don't cache stale results)
+  const clearResults = () => {
+    setResults([]);
+    setActiveResult(null);
+  };
+
   const toggleStrategy = (strategyId: string) => {
+    clearResults();
     setSelectedStrategies(prev => {
       if (prev.includes(strategyId)) {
         if (prev.length === 1) return prev;
@@ -204,13 +211,13 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
             <Sliders className="w-4 h-4" />
             Optimization Settings
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-xs font-medium text-blue-800 mb-1">Windows (3-10)</label>
               <input
                 type="number"
                 value={numWindows}
-                onChange={(e) => setNumWindows(Math.max(3, Math.min(10, Number(e.target.value))))}
+                onChange={(e) => { clearResults(); setNumWindows(Math.max(3, Math.min(10, Number(e.target.value)))); }}
                 className="input-modern text-sm"
                 min={3}
                 max={10}
@@ -221,7 +228,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
               <input
                 type="number"
                 value={trainRatio}
-                onChange={(e) => setTrainRatio(Math.max(0.5, Math.min(0.9, Number(e.target.value))))}
+                onChange={(e) => { clearResults(); setTrainRatio(Math.max(0.5, Math.min(0.9, Number(e.target.value)))); }}
                 className="input-modern text-sm"
                 min={0.5}
                 max={0.9}
@@ -232,7 +239,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
               <label className="block text-xs font-medium text-blue-800 mb-1">Optimize For</label>
               <select
                 value={optimizationMetric}
-                onChange={(e) => setOptimizationMetric(e.target.value as OptimizationMetric)}
+                onChange={(e) => { clearResults(); setOptimizationMetric(e.target.value as OptimizationMetric); }}
                 className="input-modern text-sm"
               >
                 <option value="sharpe">Sharpe Ratio</option>
@@ -247,7 +254,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
               <input
                 type="number"
                 value={initialCapital}
-                onChange={(e) => setInitialCapital(Number(e.target.value))}
+                onChange={(e) => { clearResults(); setInitialCapital(Number(e.target.value)); }}
                 className="input-modern text-sm"
                 min={1000}
                 step={1000}
@@ -258,7 +265,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
               <input
                 type="number"
                 value={transactionCost}
-                onChange={(e) => setTransactionCost(Number(e.target.value))}
+                onChange={(e) => { clearResults(); setTransactionCost(Number(e.target.value)); }}
                 className="input-modern text-sm"
                 min={0}
                 max={5}
@@ -268,7 +275,7 @@ export default function OptimizationTab({ data, symbol }: OptimizationTabProps) 
             <div>
               <label className="block text-xs font-medium text-blue-800 mb-1">Allow Shorts</label>
               <button
-                onClick={() => setAllowShorts(!allowShorts)}
+                onClick={() => { clearResults(); setAllowShorts(!allowShorts); }}
                 className={`w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   allowShorts ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border border-gray-300'
                 }`}
