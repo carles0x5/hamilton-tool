@@ -52,16 +52,39 @@ function App() {
       if (cached) {
         ohlcvData = cached;
         setIsUsingCache(true);
-      } else {
-        ohlcvData = await fetchMarketData(selectedSymbol, selectedCategory, selectedTimeframe);
-        await setCachedData(selectedSymbol, selectedTimeframe, 'A', ohlcvData);
+        setRawData(ohlcvData);
+        setLoading(false);
+        
+        // Try to refresh in background (don't wait for it)
+        fetchMarketData(selectedSymbol, selectedCategory, selectedTimeframe)
+          .then(async (freshData) => {
+            await setCachedData(selectedSymbol, selectedTimeframe, 'A', freshData);
+            setRawData(freshData);
+            setIsUsingCache(false);
+          })
+          .catch(() => {
+            // Silently fail - we already have cached data
+          });
+        return;
       }
-
+      
+      // No cache, fetch fresh data
+      ohlcvData = await fetchMarketData(selectedSymbol, selectedCategory, selectedTimeframe);
+      await setCachedData(selectedSymbol, selectedTimeframe, 'A', ohlcvData);
       setRawData(ohlcvData);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching data';
-      setError(errorMessage);
-      setRawData([]);
+      // If API fails, try to use any cached data (even if stale)
+      const cached = await getCachedData(selectedSymbol, selectedTimeframe, 'A');
+      if (cached && cached.length > 0) {
+        setRawData(cached);
+        setIsUsingCache(true);
+        const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching data';
+        setError(`${errorMessage}. Using cached data instead.`);
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'An error occurred while fetching data';
+        setError(errorMessage);
+        setRawData([]);
+      }
     } finally {
       setLoading(false);
     }

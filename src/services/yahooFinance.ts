@@ -61,6 +61,7 @@ async function fetchYahooData(
       headers: {
         'Accept': 'application/json',
       },
+      timeout: 10000, // 10 second timeout for initial request
     });
 
     const data = response.data as YahooFinanceResponse;
@@ -78,10 +79,18 @@ async function fetchYahooData(
       .map((timestamp, index) => {
         const date = new Date(timestamp * 1000);
         // Use adjusted close if available, otherwise use regular close
-        const closePrice = adjClose?.adjclose?.[index] ?? quote.close[index] ?? 0;
-        const openPrice = quote.open[index] ?? 0;
-        const highPrice = quote.high[index] ?? 0;
-        const lowPrice = quote.low[index] ?? 0;
+        const rawClose = adjClose?.adjclose?.[index] ?? quote.close[index];
+        const rawOpen = quote.open[index];
+        const rawHigh = quote.high[index];
+        const rawLow = quote.low[index];
+        const rawVolume = quote.volume[index];
+        
+        // Check for null/undefined/NaN values
+        const closePrice = (rawClose !== null && rawClose !== undefined && !isNaN(rawClose)) ? rawClose : 0;
+        const openPrice = (rawOpen !== null && rawOpen !== undefined && !isNaN(rawOpen)) ? rawOpen : 0;
+        const highPrice = (rawHigh !== null && rawHigh !== undefined && !isNaN(rawHigh)) ? rawHigh : 0;
+        const lowPrice = (rawLow !== null && rawLow !== undefined && !isNaN(rawLow)) ? rawLow : 0;
+        const volume = (rawVolume !== null && rawVolume !== undefined && !isNaN(rawVolume)) ? rawVolume : 0;
         
         return {
           date: format(date, 'yyyy-MM-dd'),
@@ -89,23 +98,25 @@ async function fetchYahooData(
           high: highPrice,
           low: lowPrice,
           close: closePrice,
-          volume: quote.volume[index] ?? 0,
+          volume: volume,
         };
       })
-      .filter((item) => item.open > 0 && item.close > 0) // Filter out invalid data
+      // Filter out invalid data - must have valid OHLC prices (volume can be 0 for some assets)
+      .filter((item) => item.open > 0 && item.high > 0 && item.low > 0 && item.close > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
 
     return transformed;
   } catch (error: any) {
-    // Check if it's a 429 rate limit error or network/CORS error
+    // Check if it's a 429 rate limit error, timeout, or network/CORS error
     const isRateLimit = error?.response?.status === 429;
+    const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.includes('timeout');
     const isNetworkError = error instanceof Error && (error.message.includes('Network Error') || error.message.includes('CORS'));
     
-    if (isRateLimit || isNetworkError) {
-      console.warn(`Yahoo Finance request failed (${isRateLimit ? 'rate limited' : 'network/CORS'}), trying CORS proxy...`);
+    if (isRateLimit || isNetworkError || isTimeout) {
+      console.warn(`Yahoo Finance request failed (${isRateLimit ? 'rate limited' : isTimeout ? 'timeout' : 'network/CORS'}), trying CORS proxy...`);
       
-      // Add a small delay before retrying with proxy to avoid hammering
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Add a delay before retrying with proxy to avoid hammering
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Use a public CORS proxy as fallback
       const directUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=${interval}&range=${range}&includePrePost=false&events=div,splits`;
@@ -116,7 +127,7 @@ async function fetchYahooData(
           headers: {
             'Accept': 'application/json',
           },
-          timeout: 10000, // 10 second timeout
+          timeout: 15000, // 15 second timeout for proxy
         });
         
         const data = proxyResponse.data as YahooFinanceResponse;
@@ -133,10 +144,17 @@ async function fetchYahooData(
         const transformed: OHLCVData[] = timestamps
           .map((timestamp, index) => {
             const date = new Date(timestamp * 1000);
-            const closePrice = adjClose?.adjclose?.[index] ?? quote.close[index] ?? 0;
-            const openPrice = quote.open[index] ?? 0;
-            const highPrice = quote.high[index] ?? 0;
-            const lowPrice = quote.low[index] ?? 0;
+            const rawClose = adjClose?.adjclose?.[index] ?? quote.close[index];
+            const rawOpen = quote.open[index];
+            const rawHigh = quote.high[index];
+            const rawLow = quote.low[index];
+            const rawVolume = quote.volume[index];
+            
+            const closePrice = (rawClose !== null && rawClose !== undefined && !isNaN(rawClose)) ? rawClose : 0;
+            const openPrice = (rawOpen !== null && rawOpen !== undefined && !isNaN(rawOpen)) ? rawOpen : 0;
+            const highPrice = (rawHigh !== null && rawHigh !== undefined && !isNaN(rawHigh)) ? rawHigh : 0;
+            const lowPrice = (rawLow !== null && rawLow !== undefined && !isNaN(rawLow)) ? rawLow : 0;
+            const volume = (rawVolume !== null && rawVolume !== undefined && !isNaN(rawVolume)) ? rawVolume : 0;
             
             return {
               date: format(date, 'yyyy-MM-dd'),
@@ -144,20 +162,39 @@ async function fetchYahooData(
               high: highPrice,
               low: lowPrice,
               close: closePrice,
-              volume: quote.volume[index] ?? 0,
+              volume: volume,
             };
           })
-          .filter((item) => item.open > 0 && item.close > 0)
+          .filter((item) => item.open > 0 && item.high > 0 && item.low > 0 && item.close > 0)
           .sort((a, b) => a.date.localeCompare(b.date));
 
         return transformed;
-      } catch (proxyError) {
-        if (isRateLimit) {
-          throw new Error(`Yahoo Finance rate limit exceeded for ${symbol}. Please wait a few minutes and try again, or use cached data if available.`);
+      } catch (proxyError: any) {
+        // Provide helpful error message with suggestions
+        if (isRateLimit || proxyError?.response?.status === 429) {
+          throw new Error(
+            `Yahoo Finance is rate limiting requests for ${symbol}. ` +
+            `This can happen when too many requests are made. ` +
+            `Please try again in 5-10 minutes, or clear your browser cache and try a different symbol first. ` +
+            `If you have cached data, it will be used automatically.`
+          );
         }
-        throw new Error(`Failed to fetch data for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}. Proxy also failed: ${proxyError instanceof Error ? proxyError.message : 'Unknown error'}`);
+        if (isTimeout || proxyError?.code === 'ECONNABORTED') {
+          throw new Error(
+            `Request timed out while fetching data for ${symbol}. ` +
+            `This may be due to network issues or Yahoo Finance being slow to respond. ` +
+            `Please try again in a moment, or check your internet connection.`
+          );
+        }
+        throw new Error(
+          `Failed to fetch data for ${symbol}. ` +
+          `Original error: ${error instanceof Error ? error.message : 'Unknown error'}. ` +
+          `Proxy also failed: ${proxyError instanceof Error ? proxyError.message : 'Unknown error'}. ` +
+          `Please try again later or check if the symbol is correct.`
+        );
       }
     }
+    // Re-throw other errors as-is
     throw error;
   }
 }
@@ -174,20 +211,20 @@ export async function fetchStockDataYahoo(
 
   try {
     let interval: '1d' | '1wk' | '1h' = '1d';
-    let range = '1y'; // Default range
+    let range = '5y'; // Default range - 5 years
 
     switch (timeframe) {
       case 'daily':
         interval = '1d';
-        range = '1y'; // 1 year of daily data
+        range = '5y'; // 5 years of daily data (~1250 trading days)
         break;
       case 'weekly':
         interval = '1wk';
-        range = '2y'; // 2 years of weekly data
+        range = '10y'; // 10 years of weekly data (~520 weeks)
         break;
       case 'hourly':
         interval = '1h';
-        range = '1mo'; // 1 month of hourly data
+        range = '2mo'; // 2 months of hourly data (Yahoo limit for hourly)
         break;
     }
 
@@ -222,20 +259,20 @@ export async function fetchCryptoDataYahoo(
     }
 
     let interval: '1d' | '1wk' | '1h' = '1d';
-    let range = '1y';
+    let range = '5y';
 
     switch (timeframe) {
       case 'daily':
         interval = '1d';
-        range = '1y';
+        range = '5y'; // 5 years of daily data
         break;
       case 'weekly':
         interval = '1wk';
-        range = '2y';
+        range = '10y'; // 10 years of weekly data
         break;
       case 'hourly':
         interval = '1h';
-        range = '1mo';
+        range = '2mo'; // 2 months of hourly data
         break;
     }
 
@@ -269,20 +306,20 @@ export async function fetchForexDataYahoo(
     }
 
     let interval: '1d' | '1wk' | '1h' = '1d';
-    let range = '1y';
+    let range = '5y';
 
     switch (timeframe) {
       case 'daily':
         interval = '1d';
-        range = '1y';
+        range = '5y'; // 5 years of daily data
         break;
       case 'weekly':
         interval = '1wk';
-        range = '2y';
+        range = '10y'; // 10 years of weekly data
         break;
       case 'hourly':
         interval = '1h';
-        range = '1mo';
+        range = '2mo'; // 2 months of hourly data
         break;
     }
 
@@ -317,20 +354,20 @@ export async function fetchIndexDataYahoo(
     }
 
     let interval: '1d' | '1wk' | '1h' = '1d';
-    let range = '1y';
+    let range = '5y';
 
     switch (timeframe) {
       case 'daily':
         interval = '1d';
-        range = '1y';
+        range = '5y'; // 5 years of daily data
         break;
       case 'weekly':
         interval = '1wk';
-        range = '2y';
+        range = '10y'; // 10 years of weekly data
         break;
       case 'hourly':
         interval = '1h';
-        range = '1mo';
+        range = '2mo'; // 2 months of hourly data
         break;
     }
 

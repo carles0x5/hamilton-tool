@@ -5,8 +5,7 @@ import { createTradingSignal } from '../../utils/diagramLogic';
 import HamiltonDiagram from '../HamiltonDiagram';
 import SignalDisplay from '../SignalDisplay';
 import DataTable from '../DataTable';
-import PriceChart from '../PriceChart';
-import ForceChart from '../ForceChart';
+import CombinedCharts from '../CombinedCharts';
 import KPIDisplay from '../KPIDisplay';
 import MethodSelector from '../MethodSelector';
 import { History, RotateCcw, Sliders, Calculator } from 'lucide-react';
@@ -162,10 +161,7 @@ export default function AnalysisTab({ rawData }: AnalysisTabProps) {
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 gap-3">
-        <PriceChart data={marketData} />
-        <ForceChart data={marketData} />
-      </div>
+      <CombinedCharts data={marketData} />
     </>
   );
 }

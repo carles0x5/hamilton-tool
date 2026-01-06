@@ -89,9 +89,17 @@ function calculateMethodB(data: OHLCVData[]): MarketData[] {
 
     const prev = data[index - 1];
     const priceRange = item.high - item.low;
+    
+    // Safety check for invalid previous close
+    if (prev.close === 0 || isNaN(prev.close)) {
+      rawDemands.push(0);
+      rawSupplies.push(0);
+      return;
+    }
+    
     const priceChangePercent = ((item.close - prev.close) / prev.close) * 100;
 
-    if (priceRange === 0) {
+    if (priceRange === 0 || isNaN(priceRange)) {
       rawDemands.push(0);
       rawSupplies.push(0);
       return;
@@ -100,9 +108,16 @@ function calculateMethodB(data: OHLCVData[]): MarketData[] {
     // Close Location Value (CLV): where close is within the day's range
     const clv = ((item.close - item.low) - (item.high - item.close)) / priceRange;
     
-    // Volume-weighted directional pressure
-    const volumeFactor = Math.log10(item.volume + 1);
+    // Volume-weighted directional pressure (handle 0 volume gracefully)
+    const volumeFactor = item.volume > 0 ? Math.log10(item.volume + 1) : 1;
     const momentum = clv * Math.abs(priceChangePercent) * volumeFactor;
+    
+    // Handle NaN momentum
+    if (isNaN(momentum)) {
+      rawDemands.push(0);
+      rawSupplies.push(0);
+      return;
+    }
     
     // Split into demand (positive) and supply (negative)
     if (priceChangePercent >= 0) {
@@ -311,5 +326,9 @@ function calculateMethodD(data: OHLCVData[]): MarketData[] {
 
 // Helper function to clamp values to a range
 function clamp(value: number, min: number, max: number): number {
+  // Handle NaN - return 0
+  if (isNaN(value) || !isFinite(value)) {
+    return 0;
+  }
   return Math.max(min, Math.min(max, value));
 }
